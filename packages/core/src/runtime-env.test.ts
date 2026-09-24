@@ -177,6 +177,28 @@ describe("resolveHarnessBinary", () => {
     expect(npmShimArgv(join(npm, "sh.cmd"), node)).toBeNull();
     expect(npmShimArgv(join(npm, "gone.cmd"), node)).toBeNull();
     expect(npmShimArgv(join(npm, "missing.cmd"), node)).toBeNull();
+    // Legacy `%~dp0` cmd-shim (corepack's pnpm) and Node's own npm.cmd shape.
+    const pnpmJs = join(npm, "node_modules", "corepack", "dist", "pnpm.js");
+    const npmCli = join(npm, "node_modules", "npm", "bin", "npm-cli.js");
+    for (const file of [pnpmJs, npmCli]) {
+      mkdirSync(join(file, ".."), { recursive: true });
+      writeFileSync(file, "");
+    }
+    writeFileSync(
+      join(npm, "pnpm.cmd"),
+      '@SETLOCAL\r\n@IF EXIST "%~dp0\\node.exe" (\r\n' +
+        '  "%~dp0\\node.exe"  "%~dp0\\node_modules\\corepack\\dist\\pnpm.js" %*\r\n' +
+        ") ELSE (\r\n" +
+        '  node  "%~dp0\\node_modules\\corepack\\dist\\pnpm.js" %*\r\n)\r\n',
+    );
+    writeFileSync(
+      join(npm, "npm.cmd"),
+      '@ECHO OFF\r\nSET "NODE_EXE=%~dp0\\node.exe"\r\n' +
+        'SET "NPM_CLI_JS=%~dp0\\node_modules\\npm\\bin\\npm-cli.js"\r\n' +
+        '"%NODE_EXE%" "%NPM_CLI_JS%" %*\r\n',
+    );
+    expect(npmShimArgv(join(npm, "pnpm.cmd"), node)).toEqual([node, pnpmJs]);
+    expect(npmShimArgv(join(npm, "npm.cmd"), node)).toEqual([node, npmCli]);
 
     const env = { HOME: home, PATH: npm } as NodeJS.ProcessEnv;
     expect(resolveHarnessBinary("codex", env, "/no/such/node", "win32")).toBe(
@@ -195,11 +217,13 @@ describe("resolveHarnessBinary", () => {
     expect(spawnableArgv("codex", ["exec"], env, "win32")).toEqual(["codex", ["exec"]]);
   });
 
-  it("win32: reads a `Path`-cased env copy and never prefers drive-root POSIX dirs", () => {
+  it("win32: keeps the user's PATH order first, reads a `Path`-cased copy, never adds drive-root POSIX dirs", () => {
     const userBin = join(root, "user-bin");
     const env = { HOME: join(root, "h"), Path: userBin } as NodeJS.ProcessEnv;
     const entries = normalizedHarnessPath(env, "/no/such/node", "win32").split(delimiter);
-    expect(entries).toContain(userBin);
+    // The user's own order wins; preferred dirs only back-fill after it.
+    expect(entries[0]).toBe(userBin);
+    expect(entries).toContain(join(root, "h", ".local", "bin"));
     expect(entries).not.toContain("/usr/bin");
     expect(normalizedHarnessPath(env, "/no/such/node", "linux").split(delimiter)).toContain(
       "/usr/bin",

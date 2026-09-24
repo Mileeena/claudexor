@@ -682,8 +682,10 @@ default-reachable regression on a supported platform.
   recognized npm cmd-shim (`<bin>.cmd`, after that PATH dir's images) and
   `spawnableArgv` launches it without a shell as `process.execPath <script>`
   (or its direct `.exe` target). Setup-login evidence hashes the shim, which
-  pins the script path; the interpreter is the engine's own Node. Other shim
-  shapes (pnpm, sh programs) keep the typed advisory.
+  pins the script path; the interpreter is the engine's own Node. Known shapes:
+  cmd-shim's `%dp0%` and legacy `%~dp0` forms (corepack's pnpm/yarn) and
+  Node's own npm.cmd/npx.cmd, so `npm test`-style gates run too. Other shapes
+  (sh programs, a prefix-installed npm upgrade) keep the typed advisory.
 
 ## 3.4.0 operator-subagent panel advisories (2026-08-15)
 

@@ -7,7 +7,7 @@ import {
   statSync,
   type Stats,
 } from "node:fs";
-import { extname, join, relative } from "node:path";
+import { extname, join, relative, sep } from "node:path";
 import type { ContextFileRef, OmissionEntry, ScopeAtlasEntry } from "@claudexor/schema";
 import { runCapture } from "@claudexor/core";
 import { sensitiveResourcePolicy, sha256, type SymlinkTargetKind } from "@claudexor/util";
@@ -102,7 +102,8 @@ async function listFiles(repoRoot: string): Promise<string[]> {
   } catch {
     /* not a git repo or git missing — fall back to walk */
   }
-  return walk(repoRoot, repoRoot);
+  // Repo-relative atlas paths use `/` like git's, whatever the OS separator.
+  return walk(repoRoot, repoRoot).map((rel) => rel.split(sep).join("/"));
 }
 
 function walk(root: string, dir: string, seenDirs: Set<string> = new Set()): string[] {

@@ -77,7 +77,7 @@ export function managedNodeRoot(home: string): string {
  * use. Surfaces may still inherit other env vars, but binary resolution must not
  * depend on whether the daemon was launched from a GUI app, login shell, or CLI.
  * Existing inherited entries are never dropped (only de-duplicated); the only
- * additions are the trusted `preferred` prefixes.
+ * additions are the trusted `preferred` prefixes (suffixes on win32).
  */
 export function normalizedHarnessPath(
   source: NodeJS.ProcessEnv = process.env,
@@ -117,7 +117,10 @@ export function normalizedHarnessPath(
       : undefined);
   const inherited = (path ?? "").split(delimiter).filter(Boolean);
   const seen = new Set<string>();
-  return [...preferred, ...inherited]
+  // win32 children inherit the user's full PATH from every launch surface, so
+  // the preferred dirs only back-fill discovery there; ranking them first would
+  // shadow the user's own order (a git wrapper in ~/.local/bin, say).
+  return (platform === "win32" ? [...inherited, ...preferred] : [...preferred, ...inherited])
     .filter((entry) => {
       if (!entry || seen.has(entry)) return false;
       seen.add(entry);
@@ -203,7 +206,10 @@ export function resolveHarnessBinary(
  * and Node refuses to spawn a `.cmd` without a shell (#191). Recover what the
  * shim would run so a harness starts without one: a node-program shim becomes
  * `execPath <script>` (the Node already running Claudexor), a direct shim its
- * `.exe`/`.com` target. Any other shape returns null — never guessed.
+ * `.exe`/`.com` target. Three shapes are known: cmd-shim's current `%dp0%`
+ * form, its legacy `%~dp0` form (corepack's pnpm/yarn), and Node's own
+ * npm.cmd/npx.cmd (their bundled CLI; a prefix-installed npm is not followed).
+ * Any other shape returns null — never guessed.
  */
 export function npmShimArgv(cmdPath: string, execPath: string = process.execPath): string[] | null {
   let text: string;
@@ -212,12 +218,25 @@ export function npmShimArgv(cmdPath: string, execPath: string = process.execPath
   } catch {
     return null;
   }
-  const match = /^(.*"%_prog%"\s+)?"%dp0%\\([^"\r\n]+)"\s+%\*\s*$/m.exec(text);
-  if (!match?.[2]) return null;
-  const target = join(dirname(cmdPath), ...match[2].split("\\"));
-  if (!existsSync(target)) return null;
-  if (match[1]) return /^\s*SET "_prog=node"\s*$/m.test(text) ? [execPath, target] : null;
-  return /\.(exe|com)$/i.test(target) ? [target] : null;
+  const existing = (relative: string | undefined): string | null => {
+    const target = relative ? join(dirname(cmdPath), ...relative.split("\\")) : null;
+    return target && existsSync(target) ? target : null;
+  };
+  const cliVar = /^\s*"%NODE_EXE%"\s+"%(\w+)%"\s+%\*\s*$/m.exec(text)?.[1];
+  if (cliVar) {
+    const set = new RegExp(`^\\s*SET "${cliVar}=%~dp0\\\\([^"\\r\\n]+)"\\s*$`, "m").exec(text);
+    const script = existing(set?.[1]);
+    return script ? [execPath, script] : null;
+  }
+  const match = /^(.*)"%~?dp0%?\\([^"\r\n]+)"\s+%\*\s*$/m.exec(text);
+  const target = existing(match?.[2]);
+  if (!match || !target) return null;
+  const program = match[1] ?? "";
+  if (program.includes('"%_prog%"')) {
+    return /^\s*SET "_prog=node"\s*$/m.test(text) ? [execPath, target] : null;
+  }
+  if (/(?:^|[\s"\\])node(?:\.exe")?\s*$/.test(program)) return [execPath, target];
+  return program.trim() === "" && /\.(exe|com)$/i.test(target) ? [target] : null;
 }
 
 /**

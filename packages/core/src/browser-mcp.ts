@@ -38,7 +38,8 @@ export function claudexorArtifactRunDirectory(envelopeId: string): string {
   if (!/^[A-Za-z0-9._-]+$/.test(envelopeId) || envelopeId === "." || envelopeId === "..") {
     throw new Error("artifact envelope id is not a safe path segment");
   }
-  return join(CLAUDEXOR_ARTIFACT_DIR, envelopeId);
+  // Repo-relative with `/` on every OS: it doubles as a git pathspec.
+  return `${CLAUDEXOR_ARTIFACT_DIR}/${envelopeId}`;
 }
 
 /** The browser-MCP screenshot output subdir under the run-owned child. */
