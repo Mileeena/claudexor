@@ -16,7 +16,7 @@ import {
   type Stats,
 } from "node:fs";
 import { dirname } from "node:path";
-import { fsyncDirectory } from "@claudexor/util";
+import { deviceKey, fsyncDirectory } from "@claudexor/util";
 
 export interface AppendIntent {
   v: 1;
@@ -28,7 +28,7 @@ export function sameJournalFile(expected: Stats, actual: Stats, bytes = expected
   return (
     actual.isFile() &&
     actual.nlink === 1 &&
-    actual.dev === expected.dev &&
+    deviceKey(actual.dev) === deviceKey(expected.dev) &&
     actual.ino === expected.ino &&
     actual.size === bytes
   );

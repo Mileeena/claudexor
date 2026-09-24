@@ -69,6 +69,9 @@ export async function dispatchClaudexordEntry(
       return;
     }
     if (await deps.beltServe(argv)) return;
+    // The launcher drops its end of our stderr pipe once we are ready; a later
+    // write (a child's relayed stderr, a Node warning) must not kill the daemon.
+    process.stderr.on("error", () => {});
     await daemonMain();
   } catch (error: unknown) {
     process.stderr.write(`claudexord: ${error instanceof Error ? error.message : String(error)}\n`);

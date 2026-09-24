@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readlinkSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, extname, isAbsolute, join } from "node:path";
 import { isLaunchableExecutable } from "./executable-inspection.js";
@@ -103,14 +103,19 @@ export function normalizedHarnessPath(
     join(home, ".cursor", "bin"),
     join(home, ".npm-global", "bin"),
     join(home, ".bun", "bin"),
-    "/opt/homebrew/bin",
-    "/usr/local/bin",
-    "/usr/bin",
-    "/bin",
-    "/usr/sbin",
-    "/sbin",
+    // On win32 these would name drive-root folders any local user may create
+    // (a PATH injection ahead of the user's own installs), so never there.
+    ...(platform === "win32"
+      ? []
+      : ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]),
   ];
-  const inherited = (source.PATH ?? "").split(delimiter).filter(Boolean);
+  // win32 env keys are case-insensitive, but a plain copy of it keeps `Path`.
+  const path =
+    source.PATH ??
+    (platform === "win32"
+      ? Object.entries(source).find(([key]) => key.toUpperCase() === "PATH")?.[1]
+      : undefined);
+  const inherited = (path ?? "").split(delimiter).filter(Boolean);
   const seen = new Set<string>();
   return [...preferred, ...inherited]
     .filter((entry) => {
@@ -126,7 +131,32 @@ export function harnessRuntimeEnv(
   execPath: string = process.execPath,
   platform: NodeJS.Platform = process.platform,
 ): NodeJS.ProcessEnv {
-  return { ...source, PATH: normalizedHarnessPath(source, execPath, platform) };
+  return {
+    ...source,
+    PATH: normalizedHarnessPath(source, execPath, platform),
+    ...gitLongPathsEnv(source, platform),
+  };
+}
+
+/**
+ * Claudexor-owned worktrees nest deep under the runtime root, past win32's
+ * 260-char MAX_PATH, where Git for Windows fails ("Filename too long") unless
+ * `core.longpaths` is on. Appended as an env-scoped config entry, so it
+ * reaches every git child (vendor ones too) without touching any git config
+ * file and never replaces an entry the caller already set.
+ */
+function gitLongPathsEnv(source: NodeJS.ProcessEnv, platform: NodeJS.Platform): NodeJS.ProcessEnv {
+  if (platform !== "win32") return {};
+  const count = Number(source.GIT_CONFIG_COUNT ?? "0");
+  if (!Number.isSafeInteger(count) || count < 0) return {};
+  for (let index = 0; index < count; index += 1) {
+    if (source[`GIT_CONFIG_KEY_${index}`]?.toLowerCase() === "core.longpaths") return {};
+  }
+  return {
+    GIT_CONFIG_COUNT: String(count + 1),
+    [`GIT_CONFIG_KEY_${count}`]: "core.longpaths",
+    [`GIT_CONFIG_VALUE_${count}`]: "true",
+  };
 }
 
 /**
@@ -160,8 +190,57 @@ export function resolveHarnessBinary(
       const candidate = join(dir, name);
       if (isLaunchableExecutable(candidate, platform)) return candidate;
     }
+    // Same dir, after its images (a shell's PATHEXT order): an npm install
+    // leaves only `<bin>.cmd`, which spawnableArgv launches without a shell.
+    const shim = platform === "win32" && extname(bin) === "" ? join(dir, `${bin}.cmd`) : null;
+    if (shim && npmShimArgv(shim, execPath)) return shim;
   }
   return null;
+}
+
+/**
+ * npm's Windows cmd-shim (`codex.cmd`) relaunches `node "%dp0%\<script>" %*`,
+ * and Node refuses to spawn a `.cmd` without a shell (#191). Recover what the
+ * shim would run so a harness starts without one: a node-program shim becomes
+ * `execPath <script>` (the Node already running Claudexor), a direct shim its
+ * `.exe`/`.com` target. Any other shape returns null — never guessed.
+ */
+export function npmShimArgv(cmdPath: string, execPath: string = process.execPath): string[] | null {
+  let text: string;
+  try {
+    text = readFileSync(cmdPath, "utf8");
+  } catch {
+    return null;
+  }
+  const match = /^(.*"%_prog%"\s+)?"%dp0%\\([^"\r\n]+)"\s+%\*\s*$/m.exec(text);
+  if (!match?.[2]) return null;
+  const target = join(dirname(cmdPath), ...match[2].split("\\"));
+  if (!existsSync(target)) return null;
+  if (match[1]) return /^\s*SET "_prog=node"\s*$/m.test(text) ? [execPath, target] : null;
+  return /\.(exe|com)$/i.test(target) ? [target] : null;
+}
+
+/**
+ * The argv Node can actually spawn for `cmd`: on win32 a bare harness name or
+ * an absolute `.cmd` that resolves to a recognized npm shim becomes the shim's
+ * target (npmShimArgv); everything else is returned unchanged.
+ */
+export function spawnableArgv(
+  cmd: string,
+  args: readonly string[],
+  source: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): [string, string[]] {
+  if (platform !== "win32") return [cmd, [...args]];
+  const ext = extname(cmd).toLowerCase();
+  const shim =
+    ext === ".cmd" && isAbsolute(cmd)
+      ? cmd
+      : ext === "" && basename(cmd) === cmd
+        ? resolveHarnessBinary(cmd, source, process.execPath, platform)
+        : null;
+  const argv = shim && extname(shim).toLowerCase() === ".cmd" ? npmShimArgv(shim) : null;
+  return argv ? [argv[0]!, [...argv.slice(1), ...args]] : [cmd, [...args]];
 }
 
 /**
@@ -171,6 +250,7 @@ export function resolveHarnessBinary(
  * spellings would only resolve a path that cannot be run. A bare extensionless
  * name is not offered either: on Windows it is an npm/sh shim, not an image.
  * An explicit name that already carries an extension is honored as written.
+ * (A recognized npm `.cmd` shim is resolved separately, per PATH dir.)
  */
 const WINDOWS_IMAGE_EXTENSIONS = [".exe", ".com"] as const;
 

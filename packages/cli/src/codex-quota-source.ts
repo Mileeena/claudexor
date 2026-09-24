@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { loadConfig } from "@claudexor/config";
-import { harnessRuntimeEnv, providerScrubEnv } from "@claudexor/core";
+import { harnessRuntimeEnv, providerScrubEnv, spawnableArgv } from "@claudexor/core";
 import type { QuotaRefreshResult } from "@claudexor/daemon";
 import {
   CODEX_FILE_AUTH_ARGS,
@@ -118,9 +118,11 @@ async function readCodexCandidate(
   bin?: string,
 ): Promise<QuotaSnapshot[]> {
   const invocation = codexQuotaInvocation(baseEnv, codexHome);
-  const child = spawn(bin ?? CODEX_BIN, invocation.args, {
+  const [command, argv] = spawnableArgv(bin ?? CODEX_BIN, invocation.args, invocation.env);
+  const child = spawn(command, argv, {
     stdio: ["pipe", "pipe", "pipe"],
     env: invocation.env,
+    windowsHide: true,
   });
   const lines = createInterface({ input: child.stdout });
   const timeout = setTimeout(() => child.kill("SIGKILL"), 10_000);

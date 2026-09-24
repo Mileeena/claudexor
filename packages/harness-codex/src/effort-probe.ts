@@ -20,7 +20,7 @@
 import { spawn } from "node:child_process";
 import type { HarnessEvent, HarnessRunSpec, ModelEffortCapability } from "@claudexor/schema";
 import { EffortHint, effortLevelsForModel, mergeEffortLadders } from "@claudexor/schema";
-import { resolveEffort } from "@claudexor/core";
+import { resolveEffort, spawnableArgv } from "@claudexor/core";
 import { nowIso } from "@claudexor/util";
 import { readCodexProcessingModels } from "./processing.js";
 import type { ProcessingCapability, HarnessModel } from "@claudexor/schema";
@@ -210,8 +210,10 @@ export async function probeCodexEfforts(
   return await new Promise<CodexEffortCatalog | null>((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(bin, ["app-server", "--stdio"], {
+      const [command, argv] = spawnableArgv(bin, ["app-server", "--stdio"], opts.env);
+      child = spawn(command, argv, {
         stdio: ["pipe", "pipe", "ignore"],
+        windowsHide: true,
         ...(opts.env ? { env: opts.env } : {}),
       });
     } catch {
@@ -225,6 +227,9 @@ export async function probeCodexEfforts(
       settled = true;
       clearTimeout(timer);
       try {
+        // EOF first: behind a win32 npm shim the killed child is only the Node
+        // launcher, and the app-server grandchild exits on stdin EOF.
+        child.stdin?.destroy();
         child.kill("SIGKILL");
       } catch {
         /* the child is already gone; nothing to clean up */

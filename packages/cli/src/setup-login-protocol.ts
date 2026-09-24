@@ -15,7 +15,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { withExecutableInspection, isBoundedRegularExecutable } from "@claudexor/core";
-import { fsyncDirectory } from "@claudexor/util";
+import { deviceKey, fsyncDirectory } from "@claudexor/util";
 import {
   SetupLoginDeviceCode as SetupLoginDeviceCodeSchema,
   SetupLoginInput as SetupLoginInputSchema,
@@ -262,7 +262,7 @@ function readPrivateJson(path: string): unknown {
     if (
       named.isSymbolicLink() ||
       !named.isFile() ||
-      named.dev !== opened.dev ||
+      deviceKey(named.dev) !== deviceKey(opened.dev) ||
       named.ino !== opened.ino
     ) {
       throw new Error("setup-login sidecar changed during safe open");

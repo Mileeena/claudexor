@@ -29,6 +29,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   GEN_BEGIN,
   GEN_END,
@@ -191,7 +192,7 @@ if (!existsSync(registryDist)) {
   );
   process.exit(1);
 }
-const cliRegistry = await import(join(process.cwd(), registryDist));
+const cliRegistry = await import(pathToFileURL(join(process.cwd(), registryDist)).href);
 
 const schemaSrc = readFileSync("packages/schema/src/primitives.ts", "utf8");
 // Whitespace-tolerant: prettier may break `z.enum([...])` across lines when a

@@ -1,0 +1,3 @@
+# LF everywhere, whatever a Windows clone's core.autocrlf says: prettier checks
+# LF and the shell scripts must stay runnable from Git Bash/WSL.
+* text=auto eol=lf

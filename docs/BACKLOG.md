@@ -675,16 +675,15 @@ From the PR #189 review waves and the first required windows-latest CI runs
 (ledger rows in `docs/reference/review-ledger.md` 3.4.1 block). Neither is a
 default-reachable regression on a supported platform.
 
-- Journal atomic replace on Windows (issue #190): compaction and the
-  crash-repair rewrite `rename` over the journal's own open handle, which
-  Windows refuses (`EPERM`). Fix must keep the fsync-before-ACK discipline and
-  un-skip the four `itPosixReplace` cases on the Windows lane as its proof.
-- npm shim spawning on Windows (issue #191): default npm installs ship
-  `codex.cmd`/sh shims with no `.exe`, so ordinary runs and login refuse with
-  the typed shim advisory. Candidate fix: resolve the shim to its JS entry and
-  spawn `process.execPath <entry>` without a shell at the single resolver
-  owner (manifest evidence then binds an interpreter — schema-first), or
-  prefer the vendor's native archive in `claudexor harness install`.
+- RESOLVED — Journal atomic replace on Windows (issue #190): compaction now
+  closes the writer before its `rename` and crash repair truncates in place, so
+  the last `itPosixReplace` cases are un-skipped and run on the Windows lane.
+- RESOLVED — npm shim spawning on Windows (issue #191): the resolver accepts a
+  recognized npm cmd-shim (`<bin>.cmd`, after that PATH dir's images) and
+  `spawnableArgv` launches it without a shell as `process.execPath <script>`
+  (or its direct `.exe` target). Setup-login evidence hashes the shim, which
+  pins the script path; the interpreter is the engine's own Node. Other shim
+  shapes (pnpm, sh programs) keep the typed advisory.
 
 ## 3.4.0 operator-subagent panel advisories (2026-08-15)
 

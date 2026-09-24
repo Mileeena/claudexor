@@ -1,5 +1,6 @@
 import { closeSync, constants, fstatSync, lstatSync, openSync } from "node:fs";
 import { basename, extname, resolve } from "node:path";
+import { deviceKey } from "@claudexor/util";
 
 export interface LocalAttachment {
   kind: "image" | "file";
@@ -67,7 +68,7 @@ export function openLocalAttachment(attachment: LocalAttachment): number {
   const stat = fstatSync(fd);
   if (
     !stat.isFile() ||
-    stat.dev !== attachment.device ||
+    deviceKey(stat.dev) !== deviceKey(attachment.device) ||
     stat.ino !== attachment.inode ||
     stat.size !== attachment.sizeBytes
   ) {

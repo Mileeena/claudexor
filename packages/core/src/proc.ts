@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { registerChildProcess, unregisterChildProcess } from "./process-registry.js";
 import { createInterface } from "node:readline";
 import { composeBaseEnv } from "./env-scope.js";
+import { spawnableArgv } from "./runtime-env.js";
 import {
   killWindowsProcessTree,
   reapProcessTree,
@@ -125,15 +126,21 @@ export async function* spawnProcess(
     if (value === undefined || value === null) delete env[key];
     else env[key] = value;
   }
-  const child = spawn(cmd, args, {
+  const [command, argv] = spawnableArgv(cmd, args, env);
+  const child = spawn(command, argv, {
     cwd: opts.cwd,
     env,
     stdio: ["pipe", "pipe", "pipe"],
     // Put the child in its own process group so we can signal the WHOLE tree.
     // Harnesses spawn grandchildren (shell tools, MCP servers); without this a
     // cancel/timeout signals only the direct child and grandchildren leak,
-    // keep writing to the worktree, or hang the run forever.
-    detached: true,
+    // keep writing to the worktree, or hang the run forever. win32 has no
+    // process group to signal (taskkill /T owns the tree there), and a
+    // DETACHED_PROCESS child has no console, so every console grandchild it
+    // starts (an npm shim's codex.exe, a vendor's shell tools) would open a
+    // visible window. Attached + windowsHide shares one hidden console instead.
+    detached: process.platform !== "win32",
+    windowsHide: true,
   });
   if (typeof child.pid === "number") registerChildProcess(child.pid, cmd);
 

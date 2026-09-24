@@ -13,6 +13,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { ProjectStore } from "@claudexor/daemon";
 import { ControlDirectoryListing } from "@claudexor/schema";
+import { deviceKey } from "@claudexor/util";
 
 const MAX_DIRECTORY_ENTRIES = 1_000;
 const MAX_PROJECT_FILE_BYTES = 25 * 1024 * 1024;
@@ -200,7 +201,11 @@ export function readScopedProjectFile(
       });
     }
     const before = fstatSync(descriptor);
-    if (before.dev !== expected.dev || before.ino !== expected.ino || !before.isFile()) {
+    if (
+      deviceKey(before.dev) !== deviceKey(expected.dev) ||
+      before.ino !== expected.ino ||
+      !before.isFile()
+    ) {
       throw Object.assign(new Error("project file changed before it was opened"), {
         status: 409,
         code: "project_file_changed",
@@ -261,7 +266,7 @@ export function readScopedProjectFile(
       before.dev !== after.dev ||
       before.ino !== after.ino ||
       after.size !== bytes ||
-      final.dev !== after.dev ||
+      deviceKey(final.dev) !== deviceKey(after.dev) ||
       final.ino !== after.ino ||
       finalPath !== canonical
     ) {

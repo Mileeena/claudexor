@@ -25,6 +25,15 @@ if (process.platform !== "win32") {
   process.exit(0);
 }
 
+// A plain developer shell has no MSVC on PATH; the helper is optional there
+// (ConPTY logins report typed unavailability), so only --require insists.
+if (!options.require && spawnSync("where.exe", ["cl.exe"], { windowsHide: true }).status !== 0) {
+  process.stdout.write(
+    "ConPTY helper: cl.exe not on PATH, build skipped (use a VS Developer shell to build it)\n",
+  );
+  process.exit(0);
+}
+
 const helperSource = resolve(packageRoot, "native", "claudexor-conpty-helper.c");
 const helperOutput = resolve(
   options.out ?? resolve(packageRoot, "dist", "native", "claudexor-conpty-helper.exe"),

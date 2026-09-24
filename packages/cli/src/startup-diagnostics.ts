@@ -23,7 +23,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { logPath as canonicalLogPath } from "@claudexor/daemon";
-import { redactSecrets, safeProblemMessage } from "@claudexor/util";
+import { deviceKey, redactSecrets, safeProblemMessage } from "@claudexor/util";
 
 const DEFAULT_CURRENT_BYTES = 256 * 1024;
 const DEFAULT_RECORD_BYTES = 16 * 1024;
@@ -114,7 +114,7 @@ function validateOpenedPath(path: string, fd: number, options: SafeFileOptions):
     !named.isFile() ||
     opened.nlink !== 1 ||
     named.nlink !== 1 ||
-    opened.dev !== named.dev ||
+    deviceKey(opened.dev) !== deviceKey(named.dev) ||
     opened.ino !== named.ino
   ) {
     throw diagnosticError("target is not a singly-linked regular file");

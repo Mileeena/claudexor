@@ -11,7 +11,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -21,7 +21,7 @@ if (!existsSync(distEntry)) {
   console.error("mcp-cli-parity: packages/mcp-server/dist is missing — run `pnpm build` first");
   process.exit(1);
 }
-const { defaultClaudexorTools } = await import(distEntry);
+const { defaultClaudexorTools } = await import(pathToFileURL(distEntry).href);
 const tools = defaultClaudexorTools(async () => "");
 const RUN_TOOL_NAMES = [
   "claudexor_ask",
@@ -55,7 +55,7 @@ if (!existsSync(registryDist)) {
   console.error("mcp-cli-parity: packages/cli/dist is missing — run `pnpm build` first");
   process.exit(1);
 }
-const cliRegistry = await import(registryDist);
+const cliRegistry = await import(pathToFileURL(registryDist).href);
 const cliValueFlags = [...cliRegistry.VALUE_FLAGS];
 const cliBooleanFlags = [...cliRegistry.BOOLEAN_FLAGS];
 

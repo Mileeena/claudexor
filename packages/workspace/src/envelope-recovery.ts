@@ -37,9 +37,13 @@ export function readEnvelopeRecoveryRecord(base: string): EnvelopeRecoveryRecord
  * equality is the recycling-proof liveness identity for envelope owners
  * (command names/titles mutate; the kernel start time never does). */
 export function processStartTime(pid: number): string | null {
+  // No POSIX `ps` on win32 (Git Bash's MSYS `ps` rejects `-o`); callers fall
+  // back to bounded freshness when either side of the proof is missing.
+  if (process.platform === "win32") return null;
   try {
     const out = execFileSync("ps", ["-p", String(pid), "-o", "lstart="], {
       encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
     }).trim();
     return out.length > 0 ? out : null;
   } catch {

@@ -284,6 +284,7 @@ jobs:
       - name: Test (platform auth, agy print, ConPTY, setup transport, journal)
         run: >
           pnpm vitest run packages/schema/src/schema.test.ts
+          packages/util/src/util.test.ts
           packages/schema/src/platform-auth-policy.test.ts
           packages/core/src/process-identity.test.ts
           packages/core/src/process-tree.test.ts
@@ -308,6 +309,11 @@ jobs:
           packages/daemon/src/resource-store.model.test.ts
           packages/daemon/src/command-retention.test.ts
           packages/control-api/src/model-routes.test.ts
+
+      # End to end over the built CLI with offline fake harnesses: daemon,
+      # worktrees, journal and delivery on a real Windows host.
+      - name: Canary stories
+        run: pnpm canary
 
   swift:
     runs-on: macos-26

@@ -21,7 +21,7 @@ import {
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { JournalRecoveryRequiredError, type JournalRecoveryState } from "@claudexor/journal";
 import type { ControlJournalExportReceipt } from "@claudexor/schema";
-import { ensureCanonicalPrivateDirectory, fsyncDirectory } from "@claudexor/util";
+import { deviceKey, ensureCanonicalPrivateDirectory, fsyncDirectory } from "@claudexor/util";
 
 export function recoveryFrom(
   error: unknown,
@@ -477,16 +477,22 @@ function assertOwnedRegular(path: string, opened: BigIntStats): void {
     named.isSymbolicLink() ||
     !named.isFile() ||
     named.nlink !== 1n ||
-    opened.dev !== named.dev ||
+    deviceKey(opened.dev) !== deviceKey(named.dev) ||
     opened.ino !== named.ino
   )
     throw new Error(`journal recovery file is not a singly-linked owned regular file: ${path}`);
 }
 
 function metadata(stat: BigIntStats): string {
-  return [stat.dev, stat.ino, stat.mode, stat.nlink, stat.size, stat.mtimeNs, stat.ctimeNs].join(
-    ":",
-  );
+  return [
+    deviceKey(stat.dev),
+    stat.ino,
+    stat.mode,
+    stat.nlink,
+    stat.size,
+    stat.mtimeNs,
+    stat.ctimeNs,
+  ].join(":");
 }
 
 function securityMetadata(stat: BigIntStats): string {
@@ -496,7 +502,7 @@ function securityMetadata(stat: BigIntStats): string {
 }
 
 function identityMetadata(stat: BigIntStats): string {
-  return [stat.dev, stat.ino, securityMetadata(stat)].join(":");
+  return [deviceKey(stat.dev), stat.ino, securityMetadata(stat)].join(":");
 }
 
 function observationMetadata(stat: BigIntStats): string {

@@ -67,12 +67,27 @@ export function makeSandbox(): Sandbox {
   // install. The stub only answers liveness probes; the manifest
   // known_models stay the truth source, and no canary run ever executes it
   // (fake harnesses / typed refusals).
-  const codexStub = join(base, "codex-stub");
-  writeFileSync(
-    codexStub,
-    '#!/bin/sh\ncase "$1" in\n  --version) echo "codex-cli 0.0.0-stub" ;;\n  *) exit 1 ;;\nesac\n',
-  );
-  chmodSync(codexStub, 0o755);
+  // Windows cannot exec a `#!/bin/sh` stub; there it is the npm cmd-shim shape
+  // a real `npm i -g @openai/codex` leaves, over a Node script (#191).
+  const windows = process.platform === "win32";
+  const codexStub = join(base, windows ? "codex-stub.cmd" : "codex-stub");
+  if (windows) {
+    writeFileSync(
+      join(base, "codex-stub.js"),
+      'if (process.argv[2] === "--version") console.log("codex-cli 0.0.0-stub");\n' +
+        "else process.exitCode = 1;\n",
+    );
+    writeFileSync(
+      codexStub,
+      '@ECHO off\r\nSET dp0=%~dp0\r\nSET "_prog=node"\r\n"%_prog%"  "%dp0%\\codex-stub.js" %*\r\n',
+    );
+  } else {
+    writeFileSync(
+      codexStub,
+      '#!/bin/sh\ncase "$1" in\n  --version) echo "codex-cli 0.0.0-stub" ;;\n  *) exit 1 ;;\nesac\n',
+    );
+    chmodSync(codexStub, 0o755);
+  }
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     HOME: home,

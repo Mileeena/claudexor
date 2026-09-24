@@ -58,6 +58,7 @@ vi.mock("node:fs", async (importOriginal) => {
 import {
   assertNoInlineSecretValues,
   containsSecretLikeToken,
+  deviceKey,
   ensureCanonicalPrivateDirectory,
   fsyncDirectory,
   hashJson,
@@ -185,11 +186,20 @@ describe("util", () => {
     const config = process.env.CLAUDEXOR_CONFIG_DIR;
     try {
       delete process.env.CLAUDEXOR_CONFIG_DIR;
-      expect(userConfigDir()).toMatch(/\.claudexor\/v3$/);
+      expect(userConfigDir()).toMatch(/\.claudexor[\\/]v3$/);
     } finally {
       if (config === undefined) delete process.env.CLAUDEXOR_CONFIG_DIR;
       else process.env.CLAUDEXOR_CONFIG_DIR = config;
     }
+  });
+});
+
+describe("deviceKey", () => {
+  it("drops the win32 device so a path stat (dev 0) and its fd stat agree", () => {
+    // libuv's GetFileInformationByName path-stat reports dev 0; fstat does not.
+    expect(deviceKey(0n, "win32")).toBe(deviceKey(987113859n, "win32"));
+    expect(deviceKey(5, "linux")).toBe("5");
+    expect(deviceKey(5, "linux")).not.toBe(deviceKey(6, "linux"));
   });
 });
 
@@ -220,13 +230,17 @@ describe("fsyncDirectory win32 tolerance", () => {
     expect(flush.closed).toHaveLength(3);
   });
 
-  it("flushes for real when the platform does not refuse", () => {
-    const dir = mkdtempSync(join(tmpdir(), "claudexor-flush-ok-"));
-    roots.push(dir);
-    expect(() => fsyncDirectory(dir, "win32")).not.toThrow();
-    expect(() => fsyncDirectory(dir, "linux")).not.toThrow();
-    expect(flush.closed).toHaveLength(0);
-  });
+  // A real win32 host refuses the flush itself, so "linux" cannot pass there.
+  it.skipIf(process.platform === "win32")(
+    "flushes for real when the platform does not refuse",
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), "claudexor-flush-ok-"));
+      roots.push(dir);
+      expect(() => fsyncDirectory(dir, "win32")).not.toThrow();
+      expect(() => fsyncDirectory(dir, "linux")).not.toThrow();
+      expect(flush.closed).toHaveLength(0);
+    },
+  );
 
   it("is the only owner of the directory-flush mechanism in the monorepo", () => {
     runDirectoryFlushOwnershipCheck();
@@ -266,17 +280,21 @@ describe("ensureCanonicalPrivateDirectory win32 chmod tolerance", () => {
     expect(flush.closed).toHaveLength(3);
   });
 
-  it("still tightens the mode to 0o700 when the platform does not refuse", () => {
-    const dir = ownedDir("claudexor-owned-chmod-");
-    chmodSync(dir, 0o755);
-    expect(ensureCanonicalPrivateDirectory(dir)).toBe(dir);
-    expect(statSync(dir).mode & 0o777).toBe(0o700);
-    // Attempt-first tolerance, same shape as the flush: the win32 parameter
-    // only forgives a refusal, it never skips the attempt.
-    chmodSync(dir, 0o755);
-    expect(ensureCanonicalPrivateDirectory(dir, "win32")).toBe(dir);
-    expect(statSync(dir).mode & 0o777).toBe(0o700);
-  });
+  // win32 has no POSIX directory modes to observe.
+  it.skipIf(process.platform === "win32")(
+    "still tightens the mode to 0o700 when the platform does not refuse",
+    () => {
+      const dir = ownedDir("claudexor-owned-chmod-");
+      chmodSync(dir, 0o755);
+      expect(ensureCanonicalPrivateDirectory(dir)).toBe(dir);
+      expect(statSync(dir).mode & 0o777).toBe(0o700);
+      // Attempt-first tolerance, same shape as the flush: the win32 parameter
+      // only forgives a refusal, it never skips the attempt.
+      chmodSync(dir, 0o755);
+      expect(ensureCanonicalPrivateDirectory(dir, "win32")).toBe(dir);
+      expect(statSync(dir).mode & 0o777).toBe(0o700);
+    },
+  );
 });
 
 function runDirectoryFlushOwnershipCheck(): void {
@@ -296,7 +314,7 @@ function runDirectoryFlushOwnershipCheck(): void {
         !entry.endsWith(".test.ts") &&
         readFileSync(path, "utf8").includes("O_DIRECTORY")
       ) {
-        owners.push(path.slice(packages.length + 1));
+        owners.push(path.slice(packages.length + 1).replaceAll("\\", "/"));
       }
     }
   };

@@ -345,57 +345,63 @@ describe("canary golden stories", () => {
     expect(events.some((e) => e["type"] === "run.failed")).toBe(true);
   });
 
-  it("[INV-116:cancel-fast] cancelling a run acknowledges within seconds even when gates are configured", async () => {
-    // A run with a 60s deterministic gate: Ctrl-C during the GATE phase must
-    // end the run within seconds (SIGINT -> typed daemon cancel -> abort
-    // kills the in-flight gate and skips the rest), not wait out the suite.
-    // The terminal is a typed cancelled run.failed and telemetry still lands.
-    const child = spawn(
-      process.execPath,
-      [CLI, "agent", "cancel me", "--harness", "fake-success", "--test", SLOW_GATE, "--json"],
-      {
-        cwd: sb.repo,
-        env: sb.env,
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
-    let stdout = "";
-    child.stdout.on("data", (c: Buffer) => {
-      stdout += String(c);
-    });
-    const exited = new Promise<number | null>((resolve) =>
-      child.on("exit", (code) => resolve(code)),
-    );
-    // Wait until the 60s gate is RUNNING (gate.started in events), then interrupt.
-    const runtimeRoot = join(sb.configDir, "projects");
-    const deadline = Date.now() + 60_000;
-    let runDir: string | null = null;
-    let gateRunning = false;
-    while (Date.now() < deadline && !gateRunning) {
-      if (!runDir && existsSync(runtimeRoot)) {
-        const found = readdirSync(runtimeRoot, { recursive: true, encoding: "utf8" }).find(
-          (entry) => entry.endsWith("events.jsonl"),
-        );
-        if (found) runDir = dirname(join(runtimeRoot, found));
+  // win32 Node turns child.kill("SIGINT") into TerminateProcess, so the CLI never
+  // sees an interrupt to forward; a console Ctrl+C is the Windows path.
+  it.skipIf(process.platform === "win32")(
+    "[INV-116:cancel-fast] cancelling a run acknowledges within seconds even when gates are configured",
+    async () => {
+      // A run with a 60s deterministic gate: Ctrl-C during the GATE phase must
+      // end the run within seconds (SIGINT -> typed daemon cancel -> abort
+      // kills the in-flight gate and skips the rest), not wait out the suite.
+      // The terminal is a typed cancelled run.failed and telemetry still lands.
+      const child = spawn(
+        process.execPath,
+        [CLI, "agent", "cancel me", "--harness", "fake-success", "--test", SLOW_GATE, "--json"],
+        {
+          cwd: sb.repo,
+          env: sb.env,
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      let stdout = "";
+      child.stdout.on("data", (c: Buffer) => {
+        stdout += String(c);
+      });
+      const exited = new Promise<number | null>((resolve) =>
+        child.on("exit", (code) => resolve(code)),
+      );
+      // Wait until the 60s gate is RUNNING (gate.started in events), then interrupt.
+      const runtimeRoot = join(sb.configDir, "projects");
+      const deadline = Date.now() + 60_000;
+      let runDir: string | null = null;
+      let gateRunning = false;
+      while (Date.now() < deadline && !gateRunning) {
+        if (!runDir && existsSync(runtimeRoot)) {
+          const found = readdirSync(runtimeRoot, { recursive: true, encoding: "utf8" }).find(
+            (entry) => entry.endsWith("events.jsonl"),
+          );
+          if (found) runDir = dirname(join(runtimeRoot, found));
+        }
+        if (runDir) {
+          gateRunning = readEvents(runDir).some((e) => e["type"] === "gate.started");
+        }
+        if (!gateRunning) await new Promise((r) => setTimeout(r, 100));
       }
-      if (runDir) {
-        gateRunning = readEvents(runDir).some((e) => e["type"] === "gate.started");
-      }
-      if (!gateRunning) await new Promise((r) => setTimeout(r, 100));
-    }
-    expect(gateRunning).toBe(true);
-    const cancelledAt = Date.now();
-    child.kill("SIGINT");
-    const code = await exited;
-    const ackMs = Date.now() - cancelledAt;
-    expect(ackMs).toBeLessThan(15_000); // far under the 60s gate
-    expect(code).not.toBe(0);
-    const events = readEvents(runDir as string);
-    expect(events.some((e) => e["type"] === "run.failed")).toBe(true);
-    const out = JSON.parse(stdout.slice(stdout.indexOf("{"))) as { status: string };
-    expect(out.status, JSON.stringify(events)).toBe("cancelled");
-    expect(runFileExists(runDir as string, "final/telemetry.yaml")).toBe(true);
-  }, 90_000);
+      expect(gateRunning).toBe(true);
+      const cancelledAt = Date.now();
+      child.kill("SIGINT");
+      const code = await exited;
+      const ackMs = Date.now() - cancelledAt;
+      expect(ackMs).toBeLessThan(15_000); // far under the 60s gate
+      expect(code).not.toBe(0);
+      const events = readEvents(runDir as string);
+      expect(events.some((e) => e["type"] === "run.failed")).toBe(true);
+      const out = JSON.parse(stdout.slice(stdout.indexOf("{"))) as { status: string };
+      expect(out.status, JSON.stringify(events)).toBe("cancelled");
+      expect(runFileExists(runDir as string, "final/telemetry.yaml")).toBe(true);
+    },
+    90_000,
+  );
 
   it("[INV-116:blockers-visible] a needs-decision terminal (blocking checks fact) is a SUCCEEDED lifecycle with the blocker visible — never masked as failure or silent green", () => {
     // D8 axes: the PROCESS finished (lifecycle succeeded, exit 0) while the

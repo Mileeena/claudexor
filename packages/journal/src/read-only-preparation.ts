@@ -12,6 +12,7 @@ import {
   realpathSync,
 } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
+import { deviceKey } from "@claudexor/util";
 import { ZERO_HASH, type JournalRecord } from "./frame-codec.js";
 import { readFrames, type FrameReadResult } from "./frame-reader.js";
 import type { JournalFold } from "./journal-fold.js";
@@ -405,7 +406,7 @@ function inspectEntry(
     try {
       const opened = fstatSync(fd, { bigint: true });
       if (
-        opened.dev !== stat.dev ||
+        deviceKey(opened.dev) !== deviceKey(stat.dev) ||
         opened.ino !== stat.ino ||
         !opened.isFile() ||
         observationMetadata(opened) !== observationMetadata(stat)
@@ -549,7 +550,14 @@ function semanticMetadata(stat: BigIntStats): string {
 }
 
 function identityMetadata(stat: BigIntStats): string {
-  const base = [stat.dev, stat.ino, entryType(stat), stat.mode & 0o777n, stat.uid, stat.gid];
+  const base = [
+    deviceKey(stat.dev),
+    stat.ino,
+    entryType(stat),
+    stat.mode & 0o777n,
+    stat.uid,
+    stat.gid,
+  ];
   if (!stat.isDirectory()) base.push(stat.nlink);
   return base.join(":");
 }

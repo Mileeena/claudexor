@@ -32,6 +32,10 @@ __afterAllReap(() => {
 const sandboxConfigDir = reapMk(join(tmpdir(), "claudexor-vitest-config-"));
 process.env.CLAUDEXOR_CONFIG_DIR = sandboxConfigDir;
 
+// Git for Windows ships `core.autocrlf=true` in its SYSTEM config (GitHub's
+// Windows runners too); fixture repos must keep the bytes the test wrote.
+if (process.platform === "win32") process.env.GIT_CONFIG_NOSYSTEM = "1";
+
 // Tests that override the config dir restore it in their own finally; any
 // test that FORGOT would otherwise leak its dir (or the real ~/.claudexor,
 // after a bare `delete`) into every later test in the worker. Force-restore:

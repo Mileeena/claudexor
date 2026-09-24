@@ -12,10 +12,37 @@ import { delimiter, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   brokenInstallAdvisory,
+  harnessRuntimeEnv,
   managedRunnerNodeDir,
   normalizedHarnessPath,
+  npmShimArgv,
   resolveHarnessBinary,
+  spawnableArgv,
 } from "./runtime-env.js";
+
+/** npm's cmd-shim template (cmd-shim 6/7) for a `#!/usr/bin/env node` bin. */
+function npmNodeShim(target: string): string {
+  return [
+    "@ECHO off",
+    "GOTO start",
+    ":find_dp0",
+    "SET dp0=%~dp0",
+    "EXIT /b",
+    ":start",
+    "SETLOCAL",
+    "CALL :find_dp0",
+    "",
+    'IF EXIST "%dp0%\\node.exe" (',
+    '  SET "_prog=%dp0%\\node.exe"',
+    ") ELSE (",
+    '  SET "_prog=node"',
+    "  SET PATHEXT=%PATHEXT:;.JS;=;%",
+    ")",
+    "",
+    `endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\${target}" %*`,
+    "",
+  ].join("\r\n");
+}
 
 describe("resolveHarnessBinary", () => {
   let root: string;
@@ -104,10 +131,10 @@ describe("resolveHarnessBinary", () => {
     expect(resolveHarnessBinary("tool-b", env)).toBe(target);
   });
 
-  it("resolves only Windows executable images, never a shim (git.exe rule)", () => {
+  it("resolves only Windows executable images, never an unrecognized shim (git.exe rule)", () => {
     // Node cannot launch a `.cmd`/`.bat` without a shell, and Claudexor never
-    // spawns a harness through one, so an npm shim must not resolve at all —
-    // the same call v3.3.9 made for `git.exe`.
+    // spawns a harness through one, so a shim it cannot decode must not
+    // resolve at all — the same call v3.3.9 made for `git.exe`.
     const home = join(root, "win-home");
     const binDir = join(root, "win-bin");
     fakeBin(binDir, "tool-w"); // npm's extensionless sh shim
@@ -122,6 +149,79 @@ describe("resolveHarnessBinary", () => {
     expect(resolveHarnessBinary("tool-w", env, "/no/such/node", "darwin")).toBe(
       join(binDir, "tool-w"),
     );
+  });
+
+  it("decodes npm cmd-shims into a shell-free argv (#191)", () => {
+    const home = join(root, "npm-home");
+    const npm = join(root, "npm");
+    const script = join(npm, "node_modules", "@openai", "codex", "bin", "codex.js");
+    const image = join(npm, "node_modules", "cc", "bin", "cc.exe");
+    mkdirSync(join(script, ".."), { recursive: true });
+    mkdirSync(join(image, ".."), { recursive: true });
+    writeFileSync(script, "");
+    writeFileSync(image, "");
+    writeFileSync(
+      join(npm, "codex.cmd"),
+      npmNodeShim("node_modules\\@openai\\codex\\bin\\codex.js"),
+    );
+    writeFileSync(
+      join(npm, "cc.cmd"),
+      '@ECHO off\r\n"%dp0%\\node_modules\\cc\\bin\\cc.exe"   %*\r\n',
+    );
+    writeFileSync(join(npm, "sh.cmd"), npmNodeShim("x.js").replace('"_prog=node"', '"_prog=sh"'));
+    writeFileSync(join(npm, "gone.cmd"), npmNodeShim("node_modules\\gone.js"));
+    const node = "C:\\node\\node.exe";
+
+    expect(npmShimArgv(join(npm, "codex.cmd"), node)).toEqual([node, script]);
+    expect(npmShimArgv(join(npm, "cc.cmd"), node)).toEqual([image]);
+    expect(npmShimArgv(join(npm, "sh.cmd"), node)).toBeNull();
+    expect(npmShimArgv(join(npm, "gone.cmd"), node)).toBeNull();
+    expect(npmShimArgv(join(npm, "missing.cmd"), node)).toBeNull();
+
+    const env = { HOME: home, PATH: npm } as NodeJS.ProcessEnv;
+    expect(resolveHarnessBinary("codex", env, "/no/such/node", "win32")).toBe(
+      join(npm, "codex.cmd"),
+    );
+    expect(resolveHarnessBinary("sh", env, "/no/such/node", "win32")).toBeNull();
+    expect(brokenInstallAdvisory("codex", env)).toBeNull();
+    expect(spawnableArgv("codex", ["exec"], env, "win32")).toEqual([
+      process.execPath,
+      [script, "exec"],
+    ]);
+    expect(spawnableArgv(join(npm, "cc.cmd"), ["-v"], env, "win32")).toEqual([image, ["-v"]]);
+    expect(spawnableArgv("codex", ["exec"], env, "linux")).toEqual(["codex", ["exec"]]);
+    // An image in the same dir still wins, and is spawned as-is.
+    fakeBin(npm, "codex.exe");
+    expect(spawnableArgv("codex", ["exec"], env, "win32")).toEqual(["codex", ["exec"]]);
+  });
+
+  it("win32: reads a `Path`-cased env copy and never prefers drive-root POSIX dirs", () => {
+    const userBin = join(root, "user-bin");
+    const env = { HOME: join(root, "h"), Path: userBin } as NodeJS.ProcessEnv;
+    const entries = normalizedHarnessPath(env, "/no/such/node", "win32").split(delimiter);
+    expect(entries).toContain(userBin);
+    expect(entries).not.toContain("/usr/bin");
+    expect(normalizedHarnessPath(env, "/no/such/node", "linux").split(delimiter)).toContain(
+      "/usr/bin",
+    );
+  });
+
+  it("win32: appends an env-scoped core.longpaths git config exactly once", () => {
+    const base = { HOME: root, PATH: "" } as NodeJS.ProcessEnv;
+    const env = harnessRuntimeEnv(base, "/no/such/node", "win32");
+    expect(env).toMatchObject({
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "core.longpaths",
+      GIT_CONFIG_VALUE_0: "true",
+    });
+    expect(harnessRuntimeEnv(env, "/no/such/node", "win32").GIT_CONFIG_COUNT).toBe("1");
+    const own = { ...base, GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "user.name" };
+    expect(harnessRuntimeEnv(own, "/no/such/node", "win32")).toMatchObject({
+      GIT_CONFIG_COUNT: "2",
+      GIT_CONFIG_KEY_0: "user.name",
+      GIT_CONFIG_KEY_1: "core.longpaths",
+    });
+    expect(harnessRuntimeEnv(base, "/no/such/node", "linux").GIT_CONFIG_COUNT).toBeUndefined();
   });
 
   it("brokenInstallAdvisory returns null when the binary resolves or nothing is on disk", () => {

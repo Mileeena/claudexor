@@ -99,7 +99,8 @@ composer](docs/assets/app-agent-run.jpg)
   `ANTHROPIC_API_KEY`, ... as fallbacks; the raw-API route needs only a key).
   Log in through Claudexor, not the bare vendor CLI — see
   [Install And Login](docs/AGENT_ONBOARDING.md#install-and-login)
-- macOS for the desktop app; the CLI/daemon also run on Linux
+- macOS for the desktop app; the CLI/daemon also run on Linux and on Windows
+  10/11 x64 (see [Windows](#windows))
 
 ## Install
 
@@ -111,6 +112,20 @@ claudexor doctor
 ```
 
 You can also build from source — see Quickstart below.
+
+### Windows
+
+The CLI and daemon run on Windows 10/11 x64 with Node.js >= 20.19 and Git for
+Windows. A vendor CLI works from its native installer or from a plain
+`npm install -g` (the npm `codex.cmd` shim is launched without a shell). Run
+Claudexor's own commands from any terminal; harness children share one hidden
+console, so no windows pop up during a run. Claudexor's worktrees nest deep
+under its runtime root, so its git children get `core.longpaths` from the
+environment without touching your git config. Not on Windows yet: the desktop
+app (macOS only) and `claudexor harness install --target local` (install the
+vendor CLI yourself, then run `claudexor doctor`). Building from source works in
+a plain shell; the optional ConPTY login helper builds only from a Visual Studio
+Developer shell.
 
 On a Mac, the app is the easiest way in — it ships as a signed and
 notarized DMG, so it installs like any ordinary Mac app, with no Gatekeeper

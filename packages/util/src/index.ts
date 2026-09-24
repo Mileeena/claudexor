@@ -77,6 +77,20 @@ export function ensureDir(path: string): void {
 }
 
 /**
+ * `stat.dev` as an identity component (comparisons and fingerprints). On win32
+ * libuv's path stat fast path (GetFileInformationByName; Node 22 on Windows 11
+ * 24H2+) reports `dev` 0 while `fstat` reports the real volume serial, so the
+ * descriptor and the path of ONE file disagree. There the device is dropped and
+ * the inode (NTFS file index) plus the callers' realpath checks carry identity.
+ */
+export function deviceKey(
+  dev: number | bigint,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return platform === "win32" ? "" : String(dev);
+}
+
+/**
  * Establish a private daemon-owned directory without following any symlink in
  * the supplied spelling. The direct parent must already exist canonically;
  * callers create nested owned roots one level at a time. No chmod occurs until
@@ -117,7 +131,7 @@ export function ensureCanonicalPrivateDirectory(
       !opened.isDirectory() ||
       named.isSymbolicLink() ||
       !named.isDirectory() ||
-      opened.dev !== named.dev ||
+      deviceKey(opened.dev) !== deviceKey(named.dev) ||
       opened.ino !== named.ino ||
       realpathSync.native(absolute) !== absolute ||
       (typeof process.getuid === "function" && opened.uid !== process.getuid())

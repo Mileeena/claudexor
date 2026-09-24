@@ -247,8 +247,6 @@ describe("DurableJournal", () => {
     prepared.close();
   });
 
-  const itPosixReplace = it.runIf(process.platform !== "win32");
-
   it("discards a complete first frame when a batch stops before its second frame", () => {
     const crashed = openJournal((fd, batch) => {
       const secondFrameOffset = batch.indexOf(batch.subarray(0, 8), 8);
@@ -360,62 +358,56 @@ describe("DurableJournal", () => {
     journal.close();
   });
 
-  itPosixReplace(
-    "atomically compacts frames, invalidates the old epoch cursor, and remains appendable",
-    () => {
-      const journal = openJournal();
-      for (let index = 0; index < 100; index += 1) {
-        journal.append("probe.saved", { index, repeated: "same-value".repeat(20) });
-      }
-      const cursor = journal.currentCursor();
-      const before = journal.physicalBytes();
-      const compacted = journal.compact();
-      expect(compacted).toMatchObject({ beforeBytes: before, records: 100 });
-      expect(compacted!.afterBytes).toBeLessThan(before);
-      expect(() => journal.sequenceAfter(cursor)).toThrow(/stale epoch/);
-      expect(journal.append("probe.saved", { index: 100 }).seq).toBe(101);
-      journal.close();
+  it("atomically compacts frames, invalidates the old epoch cursor, and remains appendable", () => {
+    const journal = openJournal();
+    for (let index = 0; index < 100; index += 1) {
+      journal.append("probe.saved", { index, repeated: "same-value".repeat(20) });
+    }
+    const cursor = journal.currentCursor();
+    const before = journal.physicalBytes();
+    const compacted = journal.compact();
+    expect(compacted).toMatchObject({ beforeBytes: before, records: 100 });
+    expect(compacted!.afterBytes).toBeLessThan(before);
+    expect(() => journal.sequenceAfter(cursor)).toThrow(/stale epoch/);
+    expect(journal.append("probe.saved", { index: 100 }).seq).toBe(101);
+    journal.close();
 
-      const reopened = openJournal();
-      expect(reopened.records()).toHaveLength(101);
-      expect(reopened.records()[0]?.payload).toMatchObject({ index: 0 });
-      expect(reopened.records()[100]?.payload).toMatchObject({ index: 100 });
-      reopened.close();
-    },
-  );
+    const reopened = openJournal();
+    expect(reopened.records()).toHaveLength(101);
+    expect(reopened.records()[0]?.payload).toMatchObject({ index: 0 });
+    expect(reopened.records()[100]?.payload).toMatchObject({ index: 100 });
+    reopened.close();
+  });
 
-  itPosixReplace(
-    "reopens a compacted grown history without spreading records over the call stack",
-    () => {
-      const logicalRecordCount = 176_345;
-      const journal = openJournal();
-      const internals = journal as unknown as {
-        entries: Array<{ time: string; type: string; payload: unknown }>;
-        knownFileBytes: number;
-      };
-      for (let index = 0; index < logicalRecordCount; index += 1) {
-        internals.entries.push({
-          time: "2026-01-01T00:00:00.000Z",
-          type: "grown.history",
-          payload: { index },
-        });
-      }
-      // The production trigger is a physically grown journal. Setting only the
-      // size comparison avoids manufacturing 176k fsynced frames in this unit
-      // test while exercising the exact compact + replay logical-record paths.
-      internals.knownFileBytes = Number.MAX_SAFE_INTEGER;
-
-      expect(journal.compact()).toMatchObject({ records: logicalRecordCount });
-      expect(journal.currentSequence()).toBe(logicalRecordCount);
-      journal.close();
-
-      const reopened = openJournal();
-      expect(reopened.state().status).toBe("ready");
-      expect(reopened.currentSequence()).toBe(logicalRecordCount);
-      expect(reopened.records(logicalRecordCount - 1)[0]?.payload).toEqual({
-        index: logicalRecordCount - 1,
+  it("reopens a compacted grown history without spreading records over the call stack", () => {
+    const logicalRecordCount = 176_345;
+    const journal = openJournal();
+    const internals = journal as unknown as {
+      entries: Array<{ time: string; type: string; payload: unknown }>;
+      knownFileBytes: number;
+    };
+    for (let index = 0; index < logicalRecordCount; index += 1) {
+      internals.entries.push({
+        time: "2026-01-01T00:00:00.000Z",
+        type: "grown.history",
+        payload: { index },
       });
-      reopened.close();
-    },
-  );
+    }
+    // The production trigger is a physically grown journal. Setting only the
+    // size comparison avoids manufacturing 176k fsynced frames in this unit
+    // test while exercising the exact compact + replay logical-record paths.
+    internals.knownFileBytes = Number.MAX_SAFE_INTEGER;
+
+    expect(journal.compact()).toMatchObject({ records: logicalRecordCount });
+    expect(journal.currentSequence()).toBe(logicalRecordCount);
+    journal.close();
+
+    const reopened = openJournal();
+    expect(reopened.state().status).toBe("ready");
+    expect(reopened.currentSequence()).toBe(logicalRecordCount);
+    expect(reopened.records(logicalRecordCount - 1)[0]?.payload).toEqual({
+      index: logicalRecordCount - 1,
+    });
+    reopened.close();
+  });
 });
