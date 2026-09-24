@@ -686,6 +686,14 @@ default-reachable regression on a supported platform.
   cmd-shim's `%dp0%` and legacy `%~dp0` forms (corepack's pnpm/yarn) and
   Node's own npm.cmd/npx.cmd, so `npm test`-style gates run too. Other shapes
   (sh programs, a prefix-installed npm upgrade) keep the typed advisory.
+- Engine-owned HTTP ignores `HTTP(S)_PROXY` (found live 2026-09-24): Node's
+  `fetch` before v24 does not read the proxy env that the vendor CLIs honor, so
+  behind a proxy the Claude quota poll, the raw-api harness and `release check`
+  go direct. Where Anthropic's edge refuses that network (403 `forbidden`
+  "Request not allowed") the quota poll now records `transport_unavailable`
+  instead of condemning the token, so runs still route; quota stays unknown.
+  Candidate fix: `NODE_USE_ENV_PROXY=1` in the daemon launch env (Node >= 24.5)
+  once loopback control traffic is proven to bypass the proxy.
 
 ## 3.4.0 operator-subagent panel advisories (2026-08-15)
 

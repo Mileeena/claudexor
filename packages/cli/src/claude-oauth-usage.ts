@@ -352,9 +352,23 @@ async function fetchUsageDefault(accessToken: string): Promise<unknown> {
   // expired while refreshable is awaiting Claude Code's vendor-owned refresh,
   // not evidence that the account itself was revoked.
   if (res.status === 401 || res.status === 403) {
-    throw Object.assign(new Error(`oauth/usage responded ${res.status}`), {
-      quotaAbsenceReason: "auth_revoked" as QuotaAbsence["reason"],
-    });
+    // Anthropic's edge refuses a request from an unsupported network with 403
+    // `forbidden` "Request not allowed" (e.g. one that bypassed the user's
+    // HTTPS_PROXY, which Node's fetch ignores before v24). That refuses the
+    // network path, not the token, so it must never condemn the credential.
+    const body = res.status === 403 ? await res.text().catch(() => "") : "";
+    const edgeRefusal =
+      /"type"\s*:\s*"forbidden"/.test(body) && body.includes("Request not allowed");
+    throw Object.assign(
+      new Error(
+        `oauth/usage responded ${res.status}${edgeRefusal ? " (request not allowed from this network)" : ""}`,
+      ),
+      {
+        quotaAbsenceReason: (edgeRefusal
+          ? "transport_unavailable"
+          : "auth_revoked") as QuotaAbsence["reason"],
+      },
+    );
   }
   // A 429 throttles the POLL, not the plan: typed `rate_limited` so the pacer
   // can honor the vendor's Retry-After floor (owner decision 7=A: this stays

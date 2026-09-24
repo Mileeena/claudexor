@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CLAUDE_AUTH_REFRESH_TERMINATION_UNCONFIRMED } from "@claudexor/harness-claude";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   claudeOauthKeychainItem,
   forgetClaudeOauthRejections,
@@ -184,6 +184,25 @@ describe("claude oauth/usage quota source (W5.3, INV-062)", () => {
     const nativeAbsence = result.absences?.find((a) => a.subject.subject_id === null);
     expect(nativeAbsence?.reason).toBe("refresh_failed");
     expect(nativeAbsence?.detail).toContain("500");
+  });
+
+  it.each([
+    ['{"error":{"type":"forbidden","message":"Request not allowed"}}', "transport_unavailable"],
+    ['{"type":"error","error":{"type":"permission_error","message":"no"}}', "auth_revoked"],
+  ])("tells an edge network refusal from a token rejection: %s", async (body, reason) => {
+    // The edge refusal is what a request that bypassed the user's HTTPS_PROXY
+    // gets; condemning the token for it would refuse every run.
+    vi.stubGlobal("fetch", async () => new Response(body, { status: 403 }));
+    try {
+      const result = await refreshClaudeOauthUsageQuota({
+        readCredential: async () =>
+          oauthCredential({ expiresAtMs: Date.parse("2026-07-18T01:00:00Z") }),
+        now: () => new Date("2026-07-18T00:00:00Z"),
+      });
+      expect(result.absences?.find((a) => a.subject.subject_id === null)?.reason).toBe(reason);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it.each([401, 403])(
