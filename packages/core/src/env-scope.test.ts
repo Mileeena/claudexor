@@ -187,4 +187,24 @@ describe("pickAllowlistedEnv", () => {
       HTTP_PROXY: "http://proxy:8080",
     });
   });
+
+  it("win32 clean keeps the OS runtime keys and only the engine's git config", () => {
+    const parent = {
+      Path: "C:\\bin",
+      ComSpec: "C:\\Windows\\system32\\cmd.exe",
+      APPDATA: "C:\\Users\\u\\AppData\\Roaming",
+      OPENAI_API_KEY: "sk-leak",
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "http.extraHeader",
+      GIT_CONFIG_VALUE_0: "Authorization: Bearer leak",
+    };
+    const env = composeBaseEnv("clean", parent, "/no/such/node", "win32");
+    expect(env).toMatchObject({
+      COMSPEC: "C:\\Windows\\system32\\cmd.exe",
+      APPDATA: "C:\\Users\\u\\AppData\\Roaming",
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "core.longpaths",
+    });
+    expect(JSON.stringify(env)).not.toContain("leak");
+  });
 });

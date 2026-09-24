@@ -1,4 +1,4 @@
-import { harnessRuntimeEnv } from "./runtime-env.js";
+import { gitLongPathsEnv, harnessRuntimeEnv } from "./runtime-env.js";
 
 /**
  * Declarative env-scrub SSOT for harness children.
@@ -198,5 +198,16 @@ export function composeBaseEnv(
 ): NodeJS.ProcessEnv {
   const normalizedSource = harnessRuntimeEnv(source, execPath, platform);
   if (inheritance !== "clean") return normalizedSource;
-  return pickAllowlistedEnv(normalizedSource, CLEAN_ENV_ALLOWLIST, platform);
+  if (platform !== "win32")
+    return pickAllowlistedEnv(normalizedSource, CLEAN_ENV_ALLOWLIST, platform);
+  // A win32 child cannot run a cmd.exe script (npm run) or write its temp and
+  // profile state without the OS runtime keys; they are system paths, not
+  // secrets. The caller's own GIT_CONFIG_* entries stay out (they may carry an
+  // auth header); only the engine's core.longpaths entry is re-added.
+  const picked = pickAllowlistedEnv(
+    normalizedSource,
+    [...CLEAN_ENV_ALLOWLIST, ...WINDOWS_RUNTIME_ENV_KEYS],
+    platform,
+  );
+  return { ...picked, ...gitLongPathsEnv(picked, platform) };
 }

@@ -148,7 +148,10 @@ export function harnessRuntimeEnv(
  * reaches every git child (vendor ones too) without touching any git config
  * file and never replaces an entry the caller already set.
  */
-function gitLongPathsEnv(source: NodeJS.ProcessEnv, platform: NodeJS.Platform): NodeJS.ProcessEnv {
+export function gitLongPathsEnv(
+  source: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): NodeJS.ProcessEnv {
   if (platform !== "win32") return {};
   const count = Number(source.GIT_CONFIG_COUNT ?? "0");
   if (!Number.isSafeInteger(count) || count < 0) return {};
